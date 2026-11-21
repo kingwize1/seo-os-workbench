@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SEO OS AI Workbench</title>
+    <script>
+      // Redirect direct deep links on GitHub Pages back to index.html with hash routing
+      (function () {
+        var l = window.location;
+        var base = l.pathname.split('/').slice(0, 2).join('/');
+        var rest = l.pathname.slice(base.length) + l.search;
+        l.replace(l.origin + base + '/#' + (rest.startsWith('/') ? rest : '/' + rest));
+      })();
+    </script>
+  </head>
+  <body></body>
+</html>

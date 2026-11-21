@@ -1,0 +1,18 @@
+services:
+  seo-os-workbench:
+    build: .
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_PATH: /app/data/seo-os-workbench.sqlite
+      PAYMENT_PROVIDER: test
+      SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production}
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+    volumes:
+      - seo_os_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  seo_os_data:

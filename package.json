@@ -1,0 +1,50 @@
+{
+  "name": "seo-os-workbench",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SEO OS AI Workbench — Unified 3D SEO Operating System, Personal AI Agent, Business AI Coworkers, and Enterprise Governance",
+  "scripts": {
+    "dev": "vite",
+    "dev:server": "node --experimental-sqlite --import tsx server/index.ts",
+    "build": "tsc -b --noEmit && vite build",
+    "build:pages": "vite build --mode pages",
+    "preview": "vite preview",
+    "start": "node --experimental-sqlite --import tsx server/index.ts",
+    "migrate": "node --experimental-sqlite --import tsx server/migrate.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "lucide-react": "^0.475.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.2.0",
+    "three": "^0.173.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.9",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.2.0",
+    "@types/cookie-parser": "^1.4.8",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.0",
+    "@types/react": "^19.0.6",
+    "@types/react-dom": "^19.0.4",
+    "@types/supertest": "^6.0.2",
+    "@types/three": "^0.173.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^26.0.0",
+    "supertest": "^7.0.0",
+    "tailwindcss": "^4.0.9",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vite": "^6.2.0",
+    "vitest": "^3.0.7"
+  }
+}
