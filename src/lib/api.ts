@@ -409,4 +409,40 @@ export const api = {
     if (live) return live;
     return sandboxEngine.decideAdminWaitlist(entryId, decision);
   },
+
+  async getServerProviderStatus() {
+    const live = await tryHttp<{
+      paymentProvider: 'test' | 'stripe';
+      providers: {
+        key: string;
+        name: string;
+        category: string;
+        configured: boolean;
+        mode: 'LIVE_ENV_CONFIGURED' | 'MOCK_ADAPTER';
+        approvalRequired: boolean;
+        detail: string;
+      }[];
+    }>('/api/providers/status');
+    if (live) return live;
+    // Static GitHub Pages never embeds secret keys in browser bundles
+    return {
+      paymentProvider: 'test' as const,
+      providers: [
+        { key: 'stripe', name: 'Stripe Live Checkout & Webhooks', category: 'BILLING', configured: false, mode: 'MOCK_ADAPTER' as const, approvalRequired: false, detail: 'Configured in server .env (never bundled in static GitHub Pages).' },
+        { key: 'google-oauth', name: 'Google OAuth Sign-In (WBCP)', category: 'AUTH', configured: false, mode: 'MOCK_ADAPTER' as const, approvalRequired: false, detail: 'Server-only OAuth credentials.' },
+        { key: 'anthropic', name: 'Anthropic Compatible (claude-sonnet-4-6)', category: 'MODEL_PROVIDER', configured: false, mode: 'MOCK_ADAPTER' as const, approvalRequired: false, detail: 'Server-only endpoint https://api.b.ai.' },
+        { key: 'gemini', name: 'Google Gemini API', category: 'MODEL_PROVIDER', configured: false, mode: 'MOCK_ADAPTER' as const, approvalRequired: false, detail: 'Server-only Gemini model adapter.' },
+        { key: 'openai', name: 'OpenAI API', category: 'MODEL_PROVIDER', configured: false, mode: 'MOCK_ADAPTER' as const, approvalRequired: false, detail: 'Server-only OpenAI adapter.' },
+        { key: 'huggingface', name: 'HuggingFace Inference', category: 'MODEL_PROVIDER', configured: false, mode: 'MOCK_ADAPTER' as const, approvalRequired: false, detail: 'Server-only HuggingFace embeddings & inference.' },
+        { key: 'dataforseo', name: 'DataForSEO (SERP & Keywords)', category: 'SEO_DATA', configured: false, mode: 'MOCK_ADAPTER' as const, approvalRequired: false, detail: 'Server-only DataForSEO live SERP adapter.' },
+        { key: 'crawler-dev', name: 'Crawler.dev Site Crawler', category: 'CRAWL_SCRAPE', configured: false, mode: 'MOCK_ADAPTER' as const, approvalRequired: false, detail: 'Server-only site crawler adapter.' },
+        { key: 'apify', name: 'Apify Web Automation & Actors', category: 'CRAWL_SCRAPE', configured: false, mode: 'MOCK_ADAPTER' as const, approvalRequired: false, detail: 'Server-only Apify extraction adapter.' },
+        { key: 'google-maps', name: 'Google Maps / Places API', category: 'SEO_DATA', configured: false, mode: 'MOCK_ADAPTER' as const, approvalRequired: false, detail: 'Server-only Local SEO Places adapter.' },
+        { key: 'intentgpt', name: 'IntentGPT Search Intent Engine', category: 'SEO_DATA', configured: false, mode: 'MOCK_ADAPTER' as const, approvalRequired: false, detail: 'Server-only search intent & GEO engine.' },
+        { key: 'longcat-avatar', name: 'LongCat Video & Avatar API', category: 'VOICE_AVATAR', configured: false, mode: 'MOCK_ADAPTER' as const, approvalRequired: true, detail: 'Approval-gated video/avatar generation.' },
+        { key: 'openhome-voice', name: 'OpenHome Voice Clone API', category: 'VOICE_AVATAR', configured: false, mode: 'MOCK_ADAPTER' as const, approvalRequired: true, detail: 'Approval-gated open-source voice cloning.' },
+        { key: 'zernio-social', name: 'Zernio Social Poster for AI Agents', category: 'SOCIAL_AGENT', configured: false, mode: 'MOCK_ADAPTER' as const, approvalRequired: true, detail: 'Approval-gated outbound social posting.' },
+      ],
+    };
+  },
 };

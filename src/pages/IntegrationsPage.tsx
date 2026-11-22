@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { KeyRound, Lock, Plug, ShieldCheck } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { KeyRound, Lock, Plug, Server, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { DeskShell } from '@/components/DeskShell';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/lib/api';
@@ -8,6 +8,22 @@ export function IntegrationsPage() {
   const { desk, refreshDesk, showToast } = useApp();
   const [secretInputs, setSecretInputs] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [serverProviders, setServerProviders] = useState<
+    {
+      key: string;
+      name: string;
+      category: string;
+      configured: boolean;
+      mode: 'LIVE_ENV_CONFIGURED' | 'MOCK_ADAPTER';
+      approvalRequired: boolean;
+      detail: string;
+    }[]
+  >([]);
+
+  useEffect(() => {
+    if (!desk) return;
+    void api.getServerProviderStatus().then((r) => setServerProviders(r.providers)).catch(() => {});
+  }, [desk]);
 
   const handleSaveSecret = async (integrationId: string) => {
     const val = secretInputs[integrationId]?.trim();
@@ -43,6 +59,46 @@ export function IntegrationsPage() {
             <Lock className="h-3.5 w-3.5" /> Zero API Keys in Browser Storage
           </span>
         </div>
+
+        {/* Server-Side Environment Provider Matrix (Read-Only Status — Never Exposes Keys) */}
+        {serverProviders.length > 0 && (
+          <div className="os-glass rounded-2xl p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="flex items-center gap-2 font-display text-base font-bold text-white">
+                <Server className="h-4 w-4 text-cyan-400" />
+                Server-Side Live Provider Registry ({serverProviders.filter((p) => p.configured).length}/{serverProviders.length} Configured in Server .env)
+              </h2>
+              <span className="font-mono-tech text-[10px] text-slate-400">
+                Secrets stay strictly on Node backend — never bundled into browser JS
+              </span>
+            </div>
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+              {serverProviders.map((p) => (
+                <div key={p.key} className="rounded-xl border border-white/10 bg-slate-950/75 p-3 text-xs space-y-1">
+                  <div className="flex items-center justify-between gap-1.5">
+                    <span className="font-mono-tech text-[9px] uppercase text-slate-400">{p.category}</span>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 font-mono-tech text-[9px] ${
+                        p.configured
+                          ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-200'
+                          : 'border-amber-400/35 bg-amber-500/10 text-amber-200'
+                      }`}
+                    >
+                      {p.mode}
+                    </span>
+                  </div>
+                  <div className="font-semibold text-white">{p.name}</div>
+                  <p className="text-[11px] text-slate-400">{p.detail}</p>
+                  {p.approvalRequired && (
+                    <div className="flex items-center gap-1 pt-0.5 font-mono-tech text-[9px] text-amber-300">
+                      <ShieldAlert className="h-3 w-3" /> ALWAYS APPROVAL-GATED
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {desk?.integrations.map((integ) => (

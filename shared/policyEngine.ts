@@ -10,7 +10,14 @@ const SENSITIVE_KEY_PATTERN =
 
 const SENSITIVE_VALUE_PATTERNS = [
   /sk_(live|test)_[A-Za-z0-9]{8,}/g,
+  /sk-proj-[A-Za-z0-9_-]{12,}/g,
+  /sk-[A-Za-z0-9_-]{16,}/g,
+  /sk_[a-fA-F0-9]{20,}/g,
   /whsec_[A-Za-z0-9_]{8,}/g,
+  /GOCSPX-[A-Za-z0-9_-]{8,}/g,
+  /hf_[A-Za-z0-9]{12,}/g,
+  /apify_api_[A-Za-z0-9]{12,}/g,
+  /igk_live_[A-Za-z0-9]{12,}/g,
   /Bearer\s+[A-Za-z0-9._-]{8,}/gi,
   /AIza[0-9A-Za-z_-]{20,}/g,
 ];

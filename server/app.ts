@@ -21,6 +21,7 @@ import {
 } from './middleware';
 import { createPaymentProvider, type PaymentProvider } from './paymentAdapter';
 import { EmailAdapter } from './emailAdapter';
+import { getServerProviderStatuses } from './providerRegistry';
 import { Repositories } from './repositories';
 import { OrchestrationWorker } from './worker';
 
@@ -70,14 +71,24 @@ export function createApp(options?: { dbPath?: string; paymentProvider?: Payment
   app.use(createSessionMiddleware(repos));
 
   // ----------------------------------------------------------------------------
-  // Health Check
+  // Health Check & Server-Only Provider Status (NEVER exposes raw secrets)
   // ----------------------------------------------------------------------------
   app.get('/api/health', (_req, res) => {
+    const providers = getServerProviderStatuses();
     res.json({
       status: 'ok',
       paymentProvider: paymentProvider.name,
       pricing: PRICING.summaryLine,
+      configuredProvidersCount: providers.filter((p) => p.configured).length,
+      totalProvidersCount: providers.length,
       timestamp: new Date().toISOString(),
+    });
+  });
+
+  app.get('/api/providers/status', requireAuth, requireBusinessEntitlement, (_req, res) => {
+    res.json({
+      paymentProvider: paymentProvider.name,
+      providers: getServerProviderStatuses(),
     });
   });
 
