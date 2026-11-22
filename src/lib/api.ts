@@ -4,6 +4,9 @@ import type {
   PersonalWorkspace,
   SessionSnapshot,
   ThemeId,
+  WaitlistEntry,
+  WaitlistStatus,
+  WaitlistTrackerSummary,
 } from '@shared/types';
 import { sandboxEngine, type DeskBootstrapData } from './sandboxEngine';
 
@@ -325,5 +328,85 @@ export const api = {
     });
     if (live) return live;
     return sandboxEngine.decidePersonalApproval(approvalId, decision);
+  },
+
+  // Personal Agent Waitlist, Running Tracker & Instant Approval
+  async getWaitlistTracker(params?: { email?: string; access?: string; data?: string | null }) {
+    const qs = new URLSearchParams();
+    if (params?.email) qs.set('email', params.email);
+    if (params?.access) qs.set('access', params.access);
+    const live = await tryHttp<{
+      tracker: WaitlistTrackerSummary;
+      viewerEntry: WaitlistEntry | null;
+    }>(`/api/waitlist/tracker${qs.toString() ? `?${qs.toString()}` : ''}`);
+    if (live) return live;
+    return sandboxEngine.getWaitlistTracker(params?.email, params?.access, params?.data);
+  },
+
+  async joinWaitlist(input: {
+    email: string;
+    name: string;
+    roleTitle: string;
+    useCase: string;
+    preferredTone: WaitlistEntry['preferredTone'];
+    wantsBrowser: boolean;
+    wantsFiles: boolean;
+    wantsTerminal: boolean;
+    websiteUrl: string;
+  }) {
+    const originUrl = typeof window !== 'undefined' ? window.location.origin : undefined;
+    const live = await tryHttp<{
+      entry: WaitlistEntry;
+      tracker: WaitlistTrackerSummary;
+    }>('/api/waitlist/join', {
+      method: 'POST',
+      body: JSON.stringify({ ...input, originUrl }),
+    });
+    if (live) return live;
+    return sandboxEngine.joinWaitlist(input);
+  },
+
+  async inspectWaitlistApproval(token: string, encodedData?: string | null) {
+    const live = await tryHttp<{ entry: WaitlistEntry }>(
+      `/api/waitlist/approve?token=${encodeURIComponent(token)}`
+    );
+    if (live) return live;
+    const entry = sandboxEngine.inspectApprovalToken(token, encodedData);
+    if (!entry) throw new Error('Invalid or expired waitlist approval token');
+    return { entry };
+  },
+
+  async approveWaitlistByToken(token: string, encodedData?: string | null) {
+    const live = await tryHttp<{
+      approved: boolean;
+      entry: WaitlistEntry;
+      tracker: WaitlistTrackerSummary;
+    }>('/api/waitlist/approve', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+    if (live) return live;
+    return sandboxEngine.approveWaitlistByToken(token, encodedData);
+  },
+
+  async listAdminWaitlist() {
+    const live = await tryHttp<{
+      entries: WaitlistEntry[];
+      tracker: WaitlistTrackerSummary;
+    }>('/api/desk/admin/waitlist');
+    if (live) return live;
+    return sandboxEngine.listAdminWaitlist();
+  },
+
+  async decideAdminWaitlist(entryId: string, decision: WaitlistStatus) {
+    const live = await tryHttp<{
+      entry: WaitlistEntry;
+      tracker: WaitlistTrackerSummary;
+    }>(`/api/desk/admin/waitlist/${entryId}/decide`, {
+      method: 'POST',
+      body: JSON.stringify({ decision }),
+    });
+    if (live) return live;
+    return sandboxEngine.decideAdminWaitlist(entryId, decision);
   },
 };

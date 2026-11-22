@@ -1,12 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
+  Activity,
+  ArrowRight,
   Bell,
   Bot,
   CheckCircle2,
+  Clock,
   FileText,
   Globe,
   Hand,
+  Lock,
   Pause,
   Play,
   Plus,
@@ -21,27 +25,54 @@ import {
   Terminal,
   Upload,
 } from 'lucide-react';
+import { WAITLIST_CONFIG } from '@shared/constants';
 import { STATUS_VISUAL_META } from '@shared/stateMachine';
-import type { ApprovalRequest, PersonalWorkspace } from '@shared/types';
+import type {
+  ApprovalRequest,
+  PersonalWorkspace,
+  WaitlistEntry,
+  WaitlistTrackerSummary,
+} from '@shared/types';
 import { ApprovalCard } from '@/components/ApprovalCard';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/lib/api';
 
 export function PersonalAgentPage() {
   const { showToast } = useApp();
+  const [searchParams] = useSearchParams();
   const [workspace, setWorkspace] = useState<PersonalWorkspace | null>(null);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
+  const [tracker, setTracker] = useState<WaitlistTrackerSummary | null>(null);
+  const [waitlistEntry, setWaitlistEntry] = useState<WaitlistEntry | null>(null);
+  const [checkingGate, setCheckingGate] = useState(true);
+  const [lookupEmail, setLookupEmail] = useState('');
+
   const [activeTab, setActiveTab] = useState<'tasks' | 'goals' | 'monitors' | 'receipts' | 'prefs'>('tasks');
   const [prompt, setPrompt] = useState('');
   const [followUpText, setFollowUpText] = useState('');
   const [newMemory, setNewMemory] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    const res = await api.getPersonalWorkspace();
-    setWorkspace(res.workspace);
-    setApprovals(res.approvals);
-  }, []);
+  const accessParam = searchParams.get('access') || undefined;
+  const emailParam = searchParams.get('email') || undefined;
+  const dataParam = searchParams.get('data');
+
+  const load = useCallback(async (overrideEmail?: string) => {
+    const wl = await api.getWaitlistTracker({
+      email: overrideEmail ?? emailParam,
+      access: accessParam,
+      data: dataParam,
+    });
+    setTracker(wl.tracker);
+    setWaitlistEntry(wl.viewerEntry);
+
+    if (wl.viewerEntry?.status === 'APPROVED') {
+      const res = await api.getPersonalWorkspace();
+      setWorkspace(res.workspace);
+      setApprovals(res.approvals);
+    }
+    setCheckingGate(false);
+  }, [accessParam, emailParam, dataParam]);
 
   useEffect(() => {
     void load();
@@ -88,6 +119,114 @@ export function PersonalAgentPage() {
   const pendingApprovals = approvals.filter((a) => a.status === 'PENDING');
   const activeTask = workspace?.tasks[0] ?? null;
 
+  // Enforce Waitlist Approval Gate before exposing Free Personal Agent Workspace
+  if (checkingGate) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#070913] text-sm text-slate-400">
+        Verifying Personal Agent waitlist approval status...
+      </div>
+    );
+  }
+
+  if (waitlistEntry?.status !== 'APPROVED') {
+    return (
+      <div className="os-grid-bg flex min-h-screen flex-col items-center justify-center bg-[#070913] px-4 py-12 text-slate-100">
+        <div className="os-glass w-full max-w-xl rounded-2xl p-7 shadow-2xl space-y-5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-2 font-mono-tech text-xs uppercase tracking-wider text-violet-300">
+              <Lock className="h-4 w-4" /> Waitlist Approval Required
+            </span>
+            <span className="rounded-full border border-emerald-400/35 bg-emerald-500/10 px-2.5 py-0.5 font-mono-tech text-[10px] text-emerald-200">
+              Free Access Upon Approval
+            </span>
+          </div>
+
+          <div>
+            <h1 className="font-display text-2xl font-bold text-white">
+              Join the Waitlist to Unlock Your Free Personal Agent
+            </h1>
+            <p className="mt-2 text-sm leading-relaxed text-slate-300">
+              Free Personal Agent seats are granted via waitlist approval. Submit your setup profile and your details + a one-click instant approval link are sent to{' '}
+              <strong className="text-cyan-300">{WAITLIST_CONFIG.approverEmail}</strong>.
+            </p>
+          </div>
+
+          {/* Live Running Waitlist Stats */}
+          {tracker && (
+            <div className="grid grid-cols-3 gap-2.5 rounded-xl border border-white/10 bg-slate-950/80 p-3.5 text-center">
+              <div>
+                <div className="font-mono-tech text-[10px] uppercase text-slate-400">Joined</div>
+                <div className="mt-0.5 font-display text-xl font-extrabold text-white">{tracker.totalJoined}</div>
+              </div>
+              <div>
+                <div className="font-mono-tech text-[10px] uppercase text-amber-300">Pending</div>
+                <div className="mt-0.5 font-display text-xl font-extrabold text-amber-200">{tracker.pendingCount}</div>
+              </div>
+              <div>
+                <div className="font-mono-tech text-[10px] uppercase text-emerald-300">Approved</div>
+                <div className="mt-0.5 font-display text-xl font-extrabold text-emerald-200">{tracker.approvedCount}</div>
+              </div>
+            </div>
+          )}
+
+          {waitlistEntry && (
+            <div className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-3.5 text-xs text-amber-100">
+              <div className="flex items-center gap-1.5 font-semibold">
+                <Clock className="h-4 w-4" /> Queue Position #{waitlistEntry.queuePosition} — Status: {waitlistEntry.status}
+              </div>
+              <p className="mt-1 text-amber-200/80">
+                Application for <strong>{waitlistEntry.email}</strong> is awaiting approval from {WAITLIST_CONFIG.approverEmail}.
+              </p>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-3">
+            <Link
+              to="/personal"
+              className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-5 py-2.5 text-sm font-bold text-white hover:bg-violet-400"
+            >
+              Join the Waitlist for Free Access <ArrowRight className="h-4 w-4" />
+            </Link>
+            <Link
+              to="/checkout"
+              className="inline-flex items-center gap-2 rounded-xl border border-cyan-400/40 bg-cyan-500/15 px-4 py-2.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/25"
+            >
+              Or Start Business Workspace ($997)
+            </Link>
+          </div>
+
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!lookupEmail.trim()) return;
+              await load(lookupEmail.trim());
+            }}
+            className="border-t border-white/10 pt-4"
+          >
+            <label className="mb-1.5 block text-xs text-slate-400">
+              Already approved? Check by email:
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="email"
+                value={lookupEmail}
+                onChange={(e) => setLookupEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="flex-1 rounded-lg border border-white/15 bg-slate-950 px-3 py-2 text-xs text-white"
+              />
+              <button
+                type="submit"
+                className="rounded-lg bg-white/10 px-4 py-2 text-xs font-semibold text-white hover:bg-white/15"
+              >
+                Verify Access
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#070913] text-slate-100">
       {/* Personal Top Bar — Explicitly isolated from Business Org Controls */}
@@ -100,14 +239,21 @@ export function PersonalAgentPage() {
               </span>
               <div>
                 <div className="font-display text-sm font-bold text-white">Personal Agent Workspace</div>
-                <div className="font-mono-tech text-[10px] text-violet-300">
-                  Free-to-Try · Isolated Personal Scope · Mock Providers
+                <div className="font-mono-tech text-[10px] text-emerald-300">
+                  Waitlist Approved (#{waitlistEntry.queuePosition}) · Free Personal Scope · Mock Providers
                 </div>
               </div>
             </Link>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <Link
+              to="/personal"
+              className="inline-flex items-center gap-1 rounded-full border border-violet-400/35 bg-violet-500/10 px-2.5 py-0.5 font-mono-tech text-[10px] text-violet-200 hover:bg-violet-500/20"
+            >
+              <Activity className="h-3 w-3" />
+              Waitlist Tracker ({tracker?.approvedCount ?? 0} approved)
+            </Link>
             <span className="rounded-full border border-emerald-400/35 bg-emerald-500/10 px-2.5 py-0.5 font-mono-tech text-[10px] text-emerald-200">
               <ShieldCheck className="mr-1 inline h-3 w-3" />
               Zero Business Tenant Access

@@ -1,16 +1,21 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+  CheckCircle2,
+  Copy,
   CreditCard,
   Download,
   FileSearch,
+  Mail,
   Server,
   Shield,
   ShieldCheck,
   Trash2,
+  UserCheck,
   Users,
+  XCircle,
 } from 'lucide-react';
-import { PRICING, TOOL_REGISTRY } from '@shared/constants';
-import type { Organization } from '@shared/types';
+import { PRICING, TOOL_REGISTRY, WAITLIST_CONFIG } from '@shared/constants';
+import type { Organization, WaitlistEntry, WaitlistTrackerSummary } from '@shared/types';
 import { DeskShell } from '@/components/DeskShell';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/lib/api';
@@ -23,6 +28,22 @@ export function AdminPage() {
   );
   const [auditFilter, setAuditFilter] = useState('');
   const [busy, setBusy] = useState(false);
+  const [waitlistEntries, setWaitlistEntries] = useState<WaitlistEntry[]>([]);
+  const [waitlistTracker, setWaitlistTracker] = useState<WaitlistTrackerSummary | null>(null);
+
+  const loadWaitlist = useCallback(async () => {
+    try {
+      const res = await api.listAdminWaitlist();
+      setWaitlistEntries(res.entries);
+      setWaitlistTracker(res.tracker);
+    } catch {
+      // Ignore if viewer lacks admin:read
+    }
+  }, []);
+
+  useEffect(() => {
+    if (desk) void loadWaitlist();
+  }, [desk, loadWaitlist]);
 
   if (!desk) {
     return <DeskShell><div /></DeskShell>;
@@ -249,6 +270,109 @@ export function AdminPage() {
               Save Governance Preferences
             </button>
           </div>
+        </div>
+
+        {/* Personal Agent Waitlist & Instant Approval Queue */}
+        <div className="os-glass rounded-2xl p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="flex items-center gap-2 font-display text-base font-bold text-white">
+                <UserCheck className="h-4 w-4 text-violet-400" />
+                Personal Agent Waitlist &amp; Instant Approval Queue
+              </h2>
+              <p className="text-xs text-slate-400">
+                Submissions route approval links to <strong className="text-cyan-300">{WAITLIST_CONFIG.approverEmail}</strong>. Total joined:{' '}
+                <strong className="text-white">{waitlistTracker?.totalJoined ?? WAITLIST_CONFIG.seededBaseCount}</strong> · Pending:{' '}
+                <strong className="text-amber-300">{waitlistTracker?.pendingCount ?? 0}</strong> · Approved:{' '}
+                <strong className="text-emerald-300">{waitlistTracker?.approvedCount ?? WAITLIST_CONFIG.seededApprovedCount}</strong>
+              </p>
+            </div>
+          </div>
+
+          {waitlistEntries.length === 0 ? (
+            <div className="rounded-xl border border-white/10 bg-slate-950/60 p-4 text-xs text-slate-400">
+              No new Personal Agent waitlist submissions recorded in this store yet. Submissions from <code className="text-violet-300">/personal</code> appear here immediately alongside the approval email to <code className="text-cyan-300">{WAITLIST_CONFIG.approverEmail}</code>.
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {waitlistEntries.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-950/75 p-3.5 text-xs"
+                >
+                  <div className="space-y-1 max-w-2xl">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono-tech text-[10px] text-slate-400">#{entry.queuePosition}</span>
+                      <span className="font-semibold text-white">{entry.name}</span>
+                      <span className="text-cyan-300">{entry.email}</span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 font-mono-tech text-[9px] ${
+                          entry.status === 'APPROVED'
+                            ? 'bg-emerald-500/20 text-emerald-300'
+                            : entry.status === 'REJECTED'
+                              ? 'bg-rose-500/20 text-rose-300'
+                              : 'bg-amber-500/20 text-amber-200'
+                        }`}
+                      >
+                        {entry.status}
+                      </span>
+                    </div>
+                    <div className="text-slate-300">
+                      <strong>{entry.roleTitle}</strong> · Tone: {entry.preferredTone} · Use case: {entry.useCase}
+                    </div>
+                    <div className="flex items-center gap-1.5 font-mono-tech text-[10px] text-slate-400">
+                      <Mail className="h-3 w-3 text-cyan-400" />
+                      {entry.emailDispatchStatus}: {entry.emailDispatchDetail}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {entry.status !== 'APPROVED' && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await api.decideAdminWaitlist(entry.id, 'APPROVED');
+                          await loadWaitlist();
+                          showToast(`Instantly approved ${entry.name} for free Personal Agent access.`);
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-bold text-slate-950 hover:bg-emerald-400"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Instant Approve
+                      </button>
+                    )}
+                    {entry.status === 'PENDING' && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await api.decideAdminWaitlist(entry.id, 'REJECTED');
+                          await loadWaitlist();
+                          showToast(`Marked ${entry.name} as rejected.`);
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 bg-rose-500/15 px-2.5 py-1.5 text-[11px] text-rose-200 hover:bg-rose-500/25"
+                      >
+                        <XCircle className="h-3.5 w-3.5" /> Reject
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await navigator.clipboard?.writeText(entry.status === 'APPROVED' ? entry.accessUrl : entry.approvalUrl);
+                        showToast(
+                          entry.status === 'APPROVED'
+                            ? 'Copied user unlock link to clipboard.'
+                            : 'Copied instant approval link to clipboard.'
+                        );
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-[11px] text-slate-200 hover:bg-white/10"
+                    >
+                      <Copy className="h-3 w-3" />
+                      {entry.status === 'APPROVED' ? 'Copy Unlock Link' : 'Copy Approve Link'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Full Searchable Audit Trail */}

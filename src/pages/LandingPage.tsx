@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Activity,
@@ -19,8 +19,10 @@ import {
   Sparkles,
   Users,
 } from 'lucide-react';
-import { PRICING } from '@shared/constants';
+import { PRICING, WAITLIST_CONFIG } from '@shared/constants';
+import type { WaitlistTrackerSummary } from '@shared/types';
 import { WalkthroughModal } from '@/components/WalkthroughModal';
+import { api } from '@/lib/api';
 
 const FAQS = [
   {
@@ -29,11 +31,15 @@ const FAQS = [
   },
   {
     q: 'Is the Business Workspace a "free trial"?',
-    a: 'No. We never describe Business Workspace as free. The $997 one-time setup fee is paid first, and your first two months are included after setup before the $2,400/month recurring subscription starts. If you want a free-to-try entry point for individual productivity, use the Personal Agent path.',
+    a: 'No. We never describe Business Workspace as free. The $997 one-time setup fee is paid first, and your first two months are included after setup before the $2,400/month recurring subscription starts. If you want free individual access, join the Personal Agent waitlist for approval.',
+  },
+  {
+    q: 'How does the free Personal Agent waitlist work?',
+    a: `Submit your Personal Agent setup preferences on the waitlist page to claim a spot in the live running tracker. Your application details and an instant one-click approval link are sent to ${WAITLIST_CONFIG.approverEmail}. As soon as your seat is approved, your isolated Personal Agent unlocks for free.`,
   },
   {
     q: 'What is the difference between the Personal Agent path and the Business Workspace path?',
-    a: 'The Personal Agent is free to try and built for individual research, durable task plans, browser takeover, goals, recurring checks, and personal receipts — strictly isolated from business data. Business Workspace is the paid SEO OS desk with multi-client workspaces, 9 SEO specialist desks, persistent AI coworkers, Business Spaces, team RBAC, approval policies, and audit trails.',
+    a: 'The Personal Agent grants free individual access via waitlist approval and is built for personal research, durable task plans, browser takeover, goals, recurring checks, and saved receipts — strictly isolated from business data. Business Workspace is the paid SEO OS desk with multi-client workspaces, 9 SEO specialist desks, persistent AI coworkers, Business Spaces, team RBAC, approval policies, and audit trails.',
   },
   {
     q: 'Who owns our client websites, briefs, knowledge brain, and exported artifacts?',
@@ -52,6 +58,11 @@ const FAQS = [
 export function LandingPage() {
   const [walkthroughOpen, setWalkthroughOpen] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
+  const [waitlistTracker, setWaitlistTracker] = useState<WaitlistTrackerSummary | null>(null);
+
+  useEffect(() => {
+    void api.getWaitlistTracker().then((res) => setWaitlistTracker(res.tracker)).catch(() => {});
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#070913] text-slate-100">
@@ -80,10 +91,10 @@ export function LandingPage() {
 
           <div className="flex items-center gap-2">
             <Link
-              to="/personal/agent"
+              to="/personal"
               className="hidden rounded-lg border border-white/15 bg-white/5 px-3.5 py-2 text-xs font-semibold text-slate-100 hover:bg-white/10 sm:inline-flex"
             >
-              Try the Personal Agent
+              Join Free Waitlist ({waitlistTracker?.totalJoined ?? WAITLIST_CONFIG.seededBaseCount})
             </Link>
             <Link
               to="/checkout"
@@ -114,11 +125,11 @@ export function LandingPage() {
             {/* Three Primary Calls to Action */}
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
               <Link
-                to="/personal/agent"
+                to="/personal"
                 className="inline-flex items-center gap-2 rounded-xl border border-violet-400/45 bg-violet-500/20 px-5 py-3 text-sm font-semibold text-violet-100 transition hover:bg-violet-500/30"
               >
                 <Bot className="h-4 w-4" />
-                Try the Personal Agent
+                Join the Waitlist for Free Personal Agent
               </Link>
               <Link
                 to="/checkout"
@@ -136,7 +147,8 @@ export function LandingPage() {
               </button>
             </div>
             <p className="mt-4 font-mono-tech text-xs text-slate-400">
-              Business Workspace: <strong className="text-slate-200">$997 one-time setup</strong> · First 2 months included · Then <strong className="text-slate-200">$2,400/month</strong> · Personal Agent free to try
+              Business Workspace: <strong className="text-slate-200">$997 one-time setup</strong> · First 2 months included · Then <strong className="text-slate-200">$2,400/month</strong> · Personal Agent Waitlist:{' '}
+              <strong className="text-violet-300">{waitlistTracker?.totalJoined ?? WAITLIST_CONFIG.seededBaseCount} joined</strong> ({waitlistTracker?.approvedCount ?? WAITLIST_CONFIG.seededApprovedCount} approved free)
             </p>
           </div>
 
@@ -263,23 +275,25 @@ export function LandingPage() {
                 <span className="inline-flex items-center gap-2 rounded-full border border-violet-400/40 bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-200">
                   <Bot className="h-3.5 w-3.5" /> Personal Agent Path
                 </span>
-                <span className="font-mono-tech text-xs font-semibold text-emerald-300">Free to Try</span>
+                <span className="font-mono-tech text-xs font-semibold text-emerald-300">
+                  Waitlist · Free on Approval
+                </span>
               </div>
-              <h3 className="mt-4 font-display text-2xl font-bold text-white">Individual AI Productivity</h3>
+              <h3 className="mt-4 font-display text-2xl font-bold text-white">Individual AI Productivity (Waitlist)</h3>
               <p className="mt-2 text-sm text-slate-300">
-                A responsive personal agent inspired by OpenFuse. Helps research public web sources, maintains durable task plans with pause/resume/retry controls, supports human browser takeover, tracks goals and recurring checks, and saves verifiable receipts — completely isolated from business tenants.
+                Join the waitlist to gain free access to our OpenFuse-inspired Personal Agent. Submit your setup profile, track your live spot in the running queue, and unlock durable plans, browser takeover, goals, recurring checks, and saved receipts immediately upon approval.
               </p>
               <ul className="mt-4 space-y-2 text-sm text-slate-300">
-                <li className="flex items-center gap-2"><Check className="h-4 w-4 text-violet-400" /> Visible multi-step plans &amp; follow-up queue</li>
+                <li className="flex items-center gap-2"><Check className="h-4 w-4 text-violet-400" /> Live running waitlist tracker ({waitlistTracker?.totalJoined ?? WAITLIST_CONFIG.seededBaseCount} joined · {waitlistTracker?.approvedCount ?? WAITLIST_CONFIG.seededApprovedCount} approved)</li>
                 <li className="flex items-center gap-2"><Check className="h-4 w-4 text-violet-400" /> Browser research, human takeover &amp; opt-in terminal/files</li>
-                <li className="flex items-center gap-2"><Check className="h-4 w-4 text-violet-400" /> Personal preferences, memories, goals &amp; saved receipts</li>
+                <li className="flex items-center gap-2"><Check className="h-4 w-4 text-violet-400" /> Instant one-click approval workflow for free access</li>
               </ul>
             </div>
             <Link
-              to="/personal/agent"
+              to="/personal"
               className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl border border-violet-400/40 bg-violet-500/20 px-5 py-2.5 text-sm font-semibold text-violet-100 hover:bg-violet-500/30"
             >
-              Try the Personal Agent <ArrowRight className="h-4 w-4" />
+              Join the Personal Agent Waitlist <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
 
@@ -373,13 +387,13 @@ export function LandingPage() {
             <thead className="bg-slate-950/90 text-xs uppercase tracking-wider text-slate-400">
               <tr>
                 <th className="p-4">Capability</th>
-                <th className="p-4 text-violet-300">Personal Agent (Free to Try)</th>
+                <th className="p-4 text-violet-300">Personal Agent (Free Waitlist)</th>
                 <th className="p-4 text-cyan-300">Business Workspace ($997 Setup)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10 bg-slate-900/40 text-xs sm:text-sm">
               {[
-                ['Commercial Structure', 'Free to try (no credit card required)', '$997 setup · 2 months included · then $2,400/mo'],
+                ['Commercial Structure', 'Join waitlist to gain free access on approval', '$997 setup · 2 months included · then $2,400/mo'],
                 ['Workspace Interface', 'Responsive chat, plans, browser takeover & receipts', 'Full 3D/2D SEO OS spatial desk & OS window manager'],
                 ['SEO Specialist Desks & Client Brain', 'Not included (personal scope only)', '9 specialist desks + multi-client Knowledge Brains'],
                 ['Persistent AI Coworkers & Spaces', 'Single personal agent', 'Unlimited configurable coworkers + Business Spaces'],
@@ -414,25 +428,25 @@ export function LandingPage() {
             {/* Personal Card */}
             <div className="os-panel flex flex-col justify-between rounded-2xl p-6">
               <div>
-                <h3 className="font-display text-xl font-bold text-white">Personal Agent</h3>
+                <h3 className="font-display text-xl font-bold text-white">Personal Agent Waitlist</h3>
                 <div className="mt-3 flex items-baseline gap-2">
                   <span className="font-display text-4xl font-extrabold text-white">$0</span>
-                  <span className="text-sm text-slate-400">Free to try · Individual productivity</span>
+                  <span className="text-sm text-slate-400">Free access upon waitlist approval</span>
                 </div>
                 <p className="mt-3 text-xs text-slate-400">
-                  Lightweight entry point with durable plans, browser research, human takeover, goals, recurring monitors, and receipts. Does not expose business client workspaces or admin controls.
+                  Submit your setup preferences to join the running waitlist ({waitlistTracker?.totalJoined ?? WAITLIST_CONFIG.seededBaseCount} joined, {waitlistTracker?.approvedCount ?? WAITLIST_CONFIG.seededApprovedCount} approved). Does not expose business client workspaces or admin controls.
                 </p>
                 <ul className="mt-5 space-y-2.5 text-sm text-slate-200">
-                  <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-violet-400" /> Chat-based tasks with visible plans</li>
+                  <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-violet-400" /> Chat-based tasks with visible durable plans</li>
                   <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-violet-400" /> Pause, resume, stop, retry &amp; cancel controls</li>
-                  <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-violet-400" /> Opt-in terminal &amp; file permissions</li>
+                  <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-violet-400" /> Instant approval workflow &amp; live queue tracker</li>
                 </ul>
               </div>
               <Link
-                to="/personal/agent"
+                to="/personal"
                 className="mt-6 block rounded-xl border border-violet-400/50 bg-violet-500/20 py-3 text-center text-sm font-semibold text-violet-100 hover:bg-violet-500/30"
               >
-                Try the Personal Agent
+                Join the Waitlist for Free Access
               </Link>
             </div>
 

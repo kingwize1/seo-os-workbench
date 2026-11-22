@@ -20,6 +20,7 @@ import {
   SESSION_COOKIE_NAME,
 } from './middleware';
 import { createPaymentProvider, type PaymentProvider } from './paymentAdapter';
+import { EmailAdapter } from './emailAdapter';
 import { Repositories } from './repositories';
 import { OrchestrationWorker } from './worker';
 
@@ -32,6 +33,7 @@ export interface ServerBundle {
   repos: Repositories;
   worker: OrchestrationWorker;
   paymentProvider: PaymentProvider;
+  emailAdapter: EmailAdapter;
   close(): void;
 }
 
@@ -40,6 +42,7 @@ export function createApp(options?: { dbPath?: string; paymentProvider?: Payment
   const repos = new Repositories(db.sqlite);
   const worker = new OrchestrationWorker(repos);
   const paymentProvider = options?.paymentProvider ?? createPaymentProvider();
+  const emailAdapter = new EmailAdapter();
 
   // Recover any tasks stranded in RUNNING from a previous unclean shutdown
   worker.recoverInterruptedTasks();
@@ -954,6 +957,155 @@ export function createApp(options?: { dbPath?: string; paymentProvider?: Payment
     }
   });
 
+  // ----------------------------------------------------------------------------
+  // Personal Agent Waitlist, Running Tracker & Instant Approval Endpoints
+  // Emails applicant setup info + instant approval link to kingwizemusic@gmail.com
+  // ----------------------------------------------------------------------------
+  app.get('/api/waitlist/tracker', (req, res) => {
+    const summary = repos.getWaitlistTrackerSummary(emailAdapter.getApproverEmail());
+    const lookupEmail = typeof req.query.email === 'string' ? req.query.email.trim() : '';
+    const lookupAccess = typeof req.query.access === 'string' ? req.query.access.trim() : '';
+    let viewerEntry = null;
+    if (lookupAccess) {
+      viewerEntry = repos.getWaitlistByAccessToken(lookupAccess);
+    } else if (lookupEmail) {
+      viewerEntry = repos.getWaitlistByEmail(lookupEmail);
+    } else if (req.auth?.user?.email) {
+      viewerEntry = repos.getWaitlistByEmail(req.auth.user.email);
+    }
+    res.json({
+      tracker: summary,
+      viewerEntry: viewerEntry
+        ? {
+            id: viewerEntry.id,
+            email: viewerEntry.email,
+            name: viewerEntry.name,
+            roleTitle: viewerEntry.roleTitle,
+            preferredTone: viewerEntry.preferredTone,
+            status: viewerEntry.status,
+            queuePosition: viewerEntry.queuePosition,
+            accessUrl: viewerEntry.status === 'APPROVED' ? viewerEntry.accessUrl : null,
+            emailDispatchStatus: viewerEntry.emailDispatchStatus,
+            emailDispatchDetail: viewerEntry.emailDispatchDetail,
+            approverEmail: viewerEntry.approverEmail,
+            approvedAt: viewerEntry.approvedAt,
+            createdAt: viewerEntry.createdAt,
+          }
+        : null,
+    });
+  });
+
+  const waitlistJoinSchema = z.object({
+    email: z.string().email(),
+    name: z.string().min(2).max(120),
+    roleTitle: z.string().min(2).max(120),
+    useCase: z.string().min(5).max(1200),
+    preferredTone: z.enum(['concise', 'analytical', 'friendly', 'executive']).default('analytical'),
+    wantsBrowser: z.boolean().default(true),
+    wantsFiles: z.boolean().default(true),
+    wantsTerminal: z.boolean().default(false),
+    websiteUrl: z.string().max(300).optional().default(''),
+    originUrl: z.string().max(300).optional(),
+  });
+
+  app.post('/api/waitlist/join', async (req, res) => {
+    const parsed = waitlistJoinSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Please complete all required waitlist setup fields.', details: parsed.error.flatten() });
+      return;
+    }
+
+    const baseUrl =
+      parsed.data.originUrl ||
+      process.env.APP_ORIGIN ||
+      `${req.protocol}://${req.get('host')}`;
+    const approverEmail = emailAdapter.getApproverEmail();
+
+    const created = repos.createOrUpdateWaitlistEntry({
+      ...parsed.data,
+      baseUrl,
+      approverEmail,
+    });
+
+    const emailRes = await emailAdapter.sendWaitlistApprovalEmail(created);
+    const updated = repos.updateWaitlistEmailDispatch(created.id, emailRes.status, emailRes.detail);
+
+    res.status(201).json({
+      entry: {
+        id: updated.id,
+        email: updated.email,
+        name: updated.name,
+        roleTitle: updated.roleTitle,
+        useCase: updated.useCase,
+        preferredTone: updated.preferredTone,
+        status: updated.status,
+        queuePosition: updated.queuePosition,
+        approverEmail: updated.approverEmail,
+        emailDispatchStatus: updated.emailDispatchStatus,
+        emailDispatchDetail: updated.emailDispatchDetail,
+        createdAt: updated.createdAt,
+      },
+      tracker: repos.getWaitlistTrackerSummary(approverEmail),
+    });
+  });
+
+  app.get('/api/waitlist/approve', (req, res) => {
+    const token = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+    if (!token) {
+      res.status(400).json({ error: 'Missing approval token' });
+      return;
+    }
+    const entry = repos.getWaitlistByApprovalToken(token);
+    if (!entry) {
+      res.status(404).json({ error: 'Invalid or expired waitlist approval token' });
+      return;
+    }
+    res.json({ entry });
+  });
+
+  app.post('/api/waitlist/approve', (req, res) => {
+    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    if (!token) {
+      res.status(400).json({ error: 'Missing approval token' });
+      return;
+    }
+    const approverLabel = `${emailAdapter.getApproverEmail()} (Instant Approval Link)`;
+    const approved = repos.approveWaitlistByToken(token, approverLabel);
+    if (!approved) {
+      res.status(404).json({ error: 'Invalid or expired waitlist approval token' });
+      return;
+    }
+    res.json({
+      approved: true,
+      entry: approved,
+      tracker: repos.getWaitlistTrackerSummary(emailAdapter.getApproverEmail()),
+    });
+  });
+
+  app.get('/api/desk/admin/waitlist', requireAuth, requireBusinessEntitlement, requirePermission('admin:read'), (_req, res) => {
+    res.json({
+      entries: repos.listWaitlistEntries(),
+      tracker: repos.getWaitlistTrackerSummary(emailAdapter.getApproverEmail()),
+    });
+  });
+
+  app.post('/api/desk/admin/waitlist/:entryId/decide', requireAuth, requireBusinessEntitlement, requirePermission('admin:write'), (req, res) => {
+    const decision = req.body?.decision === 'REJECTED' ? 'REJECTED' : 'APPROVED';
+    const updated = repos.decideWaitlistById(
+      String(req.params.entryId),
+      decision,
+      `${req.auth!.user.name} (${req.auth!.user.email})`
+    );
+    if (!updated) {
+      res.status(404).json({ error: 'Waitlist entry not found' });
+      return;
+    }
+    res.json({
+      entry: updated,
+      tracker: repos.getWaitlistTrackerSummary(emailAdapter.getApproverEmail()),
+    });
+  });
+
   // Serve built frontend in production Docker / single-node mode
   const distDir = path.resolve(__dirname, '..', 'dist');
   if (fs.existsSync(distDir)) {
@@ -969,6 +1121,7 @@ export function createApp(options?: { dbPath?: string; paymentProvider?: Payment
     repos,
     worker,
     paymentProvider,
+    emailAdapter,
     close() {
       worker.shutdown();
       db.close();

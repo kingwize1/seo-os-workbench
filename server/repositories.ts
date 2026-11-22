@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { PRICING } from '../shared/constants';
+import { PRICING, WAITLIST_CONFIG } from '../shared/constants';
 import { redactSensitiveData } from '../shared/policyEngine';
 import {
   buildActiveTrialEntitlement,
@@ -30,6 +30,9 @@ import type {
   ThemeId,
   UsageRecord,
   User,
+  WaitlistEntry,
+  WaitlistStatus,
+  WaitlistTrackerSummary,
 } from '../shared/types';
 import {
   createSessionToken,
@@ -1515,5 +1518,193 @@ export class Repositories {
 
   deleteOrganizationData(orgId: string): void {
     this.db.prepare('DELETE FROM organizations WHERE id = ?').run(orgId);
+  }
+
+  // ----------------------------------------------------------------------------
+  // 9. Personal Agent Waitlist, Running Tracker & Instant Approval Links
+  // ----------------------------------------------------------------------------
+  private mapWaitlistRow(r: Row): WaitlistEntry {
+    return {
+      id: String(r.id),
+      email: String(r.email),
+      name: String(r.name),
+      roleTitle: String(r.role_title),
+      useCase: String(r.use_case),
+      preferredTone: String(r.preferred_tone) as WaitlistEntry['preferredTone'],
+      wantsBrowser: Boolean(r.wants_browser),
+      wantsFiles: Boolean(r.wants_files),
+      wantsTerminal: Boolean(r.wants_terminal),
+      websiteUrl: String(r.website_url || ''),
+      status: String(r.status) as WaitlistStatus,
+      queuePosition: Number(r.queue_position),
+      approvalToken: String(r.approval_token),
+      accessToken: String(r.access_token),
+      approvalUrl: String(r.approval_url),
+      accessUrl: String(r.access_url),
+      approverEmail: String(r.approver_email),
+      emailDispatchStatus: String(r.email_dispatch_status) as WaitlistEntry['emailDispatchStatus'],
+      emailDispatchDetail: String(r.email_dispatch_detail || ''),
+      approvedBy: r.approved_by ? String(r.approved_by) : null,
+      approvedAt: r.approved_at ? String(r.approved_at) : null,
+      createdAt: String(r.created_at),
+    };
+  }
+
+  createOrUpdateWaitlistEntry(input: {
+    email: string;
+    name: string;
+    roleTitle: string;
+    useCase: string;
+    preferredTone: WaitlistEntry['preferredTone'];
+    wantsBrowser: boolean;
+    wantsFiles: boolean;
+    wantsTerminal: boolean;
+    websiteUrl: string;
+    baseUrl: string;
+    approverEmail: string;
+  }): WaitlistEntry {
+    const email = input.email.trim().toLowerCase();
+    const existing = this.db.prepare('SELECT * FROM waitlist_entries WHERE email = ?').get(email) as Row | undefined;
+    if (existing) {
+      this.db
+        .prepare(
+          `UPDATE waitlist_entries
+           SET name = ?, role_title = ?, use_case = ?, preferred_tone = ?, wants_browser = ?, wants_files = ?, wants_terminal = ?, website_url = ?
+           WHERE email = ?`
+        )
+        .run(
+          input.name.trim(),
+          input.roleTitle.trim(),
+          input.useCase.trim(),
+          input.preferredTone,
+          input.wantsBrowser ? 1 : 0,
+          input.wantsFiles ? 1 : 0,
+          input.wantsTerminal ? 1 : 0,
+          input.websiteUrl.trim(),
+          email
+        );
+      return this.mapWaitlistRow(this.db.prepare('SELECT * FROM waitlist_entries WHERE email = ?').get(email) as Row);
+    }
+
+    const countRow = this.db.prepare('SELECT COUNT(*) as cnt FROM waitlist_entries').get() as Row;
+    const queuePosition = WAITLIST_CONFIG.seededBaseCount + Number(countRow.cnt || 0) + 1;
+    const id = generateId('wl');
+    const approvalToken = generateId('wlappr') + generateId('sig').slice(3);
+    const accessToken = generateId('wlacc') + generateId('tok').slice(3);
+    const cleanBase = input.baseUrl.replace(/\/+$/, '');
+    const approvalUrl = `${cleanBase}/personal/approve?token=${encodeURIComponent(approvalToken)}`;
+    const accessUrl = `${cleanBase}/personal/agent?access=${encodeURIComponent(accessToken)}&email=${encodeURIComponent(email)}`;
+    const now = new Date().toISOString();
+
+    this.db
+      .prepare(
+        `INSERT INTO waitlist_entries
+          (id, email, name, role_title, use_case, preferred_tone, wants_browser, wants_files, wants_terminal, website_url, status, queue_position, approval_token, access_token, approval_url, access_url, approver_email, email_dispatch_status, email_dispatch_detail, approved_by, approved_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, 'MOCK_OUTBOX', '', NULL, NULL, ?)`
+      )
+      .run(
+        id,
+        email,
+        input.name.trim(),
+        input.roleTitle.trim(),
+        input.useCase.trim(),
+        input.preferredTone,
+        input.wantsBrowser ? 1 : 0,
+        input.wantsFiles ? 1 : 0,
+        input.wantsTerminal ? 1 : 0,
+        input.websiteUrl.trim(),
+        queuePosition,
+        approvalToken,
+        accessToken,
+        approvalUrl,
+        accessUrl,
+        input.approverEmail,
+        now
+      );
+
+    return this.mapWaitlistRow(this.db.prepare('SELECT * FROM waitlist_entries WHERE id = ?').get(id) as Row);
+  }
+
+  updateWaitlistEmailDispatch(
+    entryId: string,
+    status: WaitlistEntry['emailDispatchStatus'],
+    detail: string
+  ): WaitlistEntry {
+    this.db
+      .prepare('UPDATE waitlist_entries SET email_dispatch_status = ?, email_dispatch_detail = ? WHERE id = ?')
+      .run(status, detail, entryId);
+    return this.mapWaitlistRow(this.db.prepare('SELECT * FROM waitlist_entries WHERE id = ?').get(entryId) as Row);
+  }
+
+  getWaitlistByEmail(email: string): WaitlistEntry | null {
+    const r = this.db
+      .prepare('SELECT * FROM waitlist_entries WHERE email = ?')
+      .get(email.trim().toLowerCase()) as Row | undefined;
+    return r ? this.mapWaitlistRow(r) : null;
+  }
+
+  getWaitlistByApprovalToken(token: string): WaitlistEntry | null {
+    const r = this.db.prepare('SELECT * FROM waitlist_entries WHERE approval_token = ?').get(token) as Row | undefined;
+    return r ? this.mapWaitlistRow(r) : null;
+  }
+
+  getWaitlistByAccessToken(token: string): WaitlistEntry | null {
+    const r = this.db.prepare('SELECT * FROM waitlist_entries WHERE access_token = ?').get(token) as Row | undefined;
+    return r ? this.mapWaitlistRow(r) : null;
+  }
+
+  approveWaitlistByToken(token: string, approverLabel: string): WaitlistEntry | null {
+    const entry = this.getWaitlistByApprovalToken(token);
+    if (!entry) return null;
+    const now = new Date().toISOString();
+    this.db
+      .prepare(`UPDATE waitlist_entries SET status = 'APPROVED', approved_by = ?, approved_at = ? WHERE id = ?`)
+      .run(approverLabel, now, entry.id);
+    return this.mapWaitlistRow(this.db.prepare('SELECT * FROM waitlist_entries WHERE id = ?').get(entry.id) as Row);
+  }
+
+  decideWaitlistById(entryId: string, status: WaitlistStatus, approverLabel: string): WaitlistEntry | null {
+    const existing = this.db.prepare('SELECT * FROM waitlist_entries WHERE id = ?').get(entryId) as Row | undefined;
+    if (!existing) return null;
+    const now = new Date().toISOString();
+    this.db
+      .prepare('UPDATE waitlist_entries SET status = ?, approved_by = ?, approved_at = ? WHERE id = ?')
+      .run(status, approverLabel, now, entryId);
+    return this.mapWaitlistRow(this.db.prepare('SELECT * FROM waitlist_entries WHERE id = ?').get(entryId) as Row);
+  }
+
+  listWaitlistEntries(): WaitlistEntry[] {
+    const rows = this.db
+      .prepare('SELECT * FROM waitlist_entries ORDER BY queue_position DESC')
+      .all() as Row[];
+    return rows.map((r) => this.mapWaitlistRow(r));
+  }
+
+  getWaitlistTrackerSummary(approverEmail: string): WaitlistTrackerSummary {
+    const entries = this.listWaitlistEntries();
+    const pendingLive = entries.filter((e) => e.status === 'PENDING').length;
+    const approvedLive = entries.filter((e) => e.status === 'APPROVED').length;
+    const rejectedLive = entries.filter((e) => e.status === 'REJECTED').length;
+
+    return {
+      approverEmail,
+      totalJoined: WAITLIST_CONFIG.seededBaseCount + entries.length,
+      pendingCount: (WAITLIST_CONFIG.seededBaseCount - WAITLIST_CONFIG.seededApprovedCount) + pendingLive,
+      approvedCount: WAITLIST_CONFIG.seededApprovedCount + approvedLive,
+      rejectedCount: rejectedLive,
+      recentSignups: entries.slice(0, 12).map((e) => {
+        const parts = e.name.split(/\s+/).filter(Boolean);
+        const initials = parts.map((p) => p[0]?.toUpperCase() || '').join('').slice(0, 2) || 'PA';
+        return {
+          id: e.id,
+          initials,
+          roleTitle: e.roleTitle,
+          preferredTone: e.preferredTone,
+          status: e.status,
+          queuePosition: e.queuePosition,
+          createdAt: e.createdAt,
+        };
+      }),
+    };
   }
 }

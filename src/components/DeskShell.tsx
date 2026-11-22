@@ -105,10 +105,10 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
               Start Business Setup ($997)
             </Link>
             <Link
-              to="/personal/agent"
+              to="/personal"
               className="rounded-xl border border-white/15 bg-white/5 px-5 py-2.5 text-sm font-medium text-slate-100 hover:bg-white/10"
             >
-              Try Free Personal Agent Instead
+              Join Free Personal Agent Waitlist
             </Link>
             {isStaticSandboxMode() && (
               <button
@@ -237,13 +237,13 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
             </select>
           </div>
 
-          {/* Switch to Isolated Personal Agent */}
+          {/* Switch to Isolated Personal Agent / Waitlist */}
           <Link
-            to="/personal/agent"
+            to="/personal"
             className="hidden items-center gap-1 rounded-lg border border-violet-400/35 bg-violet-500/15 px-2.5 py-1 text-xs font-medium text-violet-200 hover:bg-violet-500/25 lg:inline-flex"
           >
             <Bot className="h-3.5 w-3.5" />
-            Personal Agent
+            Personal Waitlist
           </Link>
 
           <button

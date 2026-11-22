@@ -13,6 +13,7 @@ import { LandingPage } from '@/pages/LandingPage';
 import { OnboardingPage } from '@/pages/OnboardingPage';
 import { OrchestratorPage } from '@/pages/OrchestratorPage';
 import { PersonalAgentPage } from '@/pages/PersonalAgentPage';
+import { PersonalApprovePage } from '@/pages/PersonalApprovePage';
 import { PersonalOverviewPage } from '@/pages/PersonalOverviewPage';
 import { ReportsPage } from '@/pages/ReportsPage';
 import { SpacesPage } from '@/pages/SpacesPage';
@@ -24,6 +25,7 @@ export function AppRoutes() {
       {/* Public & Commercial Funnel Routes */}
       <Route path="/" element={<LandingPage />} />
       <Route path="/personal" element={<PersonalOverviewPage />} />
+      <Route path="/personal/approve" element={<PersonalApprovePage />} />
       <Route path="/personal/agent" element={<PersonalAgentPage />} />
       <Route path="/business" element={<BusinessOverviewPage />} />
       <Route path="/checkout" element={<CheckoutPage />} />

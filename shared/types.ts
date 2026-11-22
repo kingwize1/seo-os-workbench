@@ -403,6 +403,50 @@ export interface PersonalReceipt {
   createdAt: string;
 }
 
+export type WaitlistStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface WaitlistEntry {
+  id: string;
+  email: string;
+  name: string;
+  roleTitle: string;
+  useCase: string;
+  preferredTone: 'concise' | 'analytical' | 'friendly' | 'executive';
+  wantsBrowser: boolean;
+  wantsFiles: boolean;
+  wantsTerminal: boolean;
+  websiteUrl: string;
+  status: WaitlistStatus;
+  queuePosition: number;
+  approvalToken: string;
+  accessToken: string;
+  approvalUrl: string;
+  accessUrl: string;
+  approverEmail: string;
+  emailDispatchStatus: 'SENT_LIVE' | 'RELAY_SENT' | 'RELAY_ACTIVATION_PENDING' | 'MOCK_OUTBOX' | 'FAILED';
+  emailDispatchDetail: string;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  createdAt: string;
+}
+
+export interface WaitlistTrackerSummary {
+  approverEmail: string;
+  totalJoined: number;
+  pendingCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  recentSignups: {
+    id: string;
+    initials: string;
+    roleTitle: string;
+    preferredTone: string;
+    status: WaitlistStatus;
+    queuePosition: number;
+    createdAt: string;
+  }[];
+}
+
 export interface PersonalWorkspace {
   id: string;
   userId: string;

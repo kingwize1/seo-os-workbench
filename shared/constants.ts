@@ -15,6 +15,13 @@ export const PRICING = {
   shortHeadline: '$997 setup, first 2 months included, then $2,400/month',
 } as const;
 
+export const WAITLIST_CONFIG = {
+  approverEmail: 'kingwizemusic@gmail.com',
+  publicBaseUrl: 'https://kingwize1.github.io/seo-os-workbench/',
+  seededBaseCount: 14,
+  seededApprovedCount: 6,
+} as const;
+
 // ==============================================================================
 // 7 SEO OS Switchable Themes (CSS vars + Three.js 3D Scene Palettes)
 // ==============================================================================

@@ -1,4 +1,4 @@
-import { PRICING, SPECIALIST_DESK_BLUEPRINTS } from '@shared/constants';
+import { PRICING, SPECIALIST_DESK_BLUEPRINTS, WAITLIST_CONFIG } from '@shared/constants';
 import { evaluateToolExecutionPolicy, redactSensitiveData } from '@shared/policyEngine';
 import {
   buildActiveTrialEntitlement,
@@ -30,6 +30,9 @@ import type {
   ThemeId,
   UsageRecord,
   User,
+  WaitlistEntry,
+  WaitlistStatus,
+  WaitlistTrackerSummary,
 } from '@shared/types';
 
 // ==============================================================================
@@ -86,10 +89,71 @@ interface SandboxState {
   invoices: InvoiceRecord[];
   notifications: NotificationItem[];
   personalWorkspace: PersonalWorkspace | null;
+  waitlistEntries: WaitlistEntry[];
+  activeWaitlistEmail: string | null;
 }
 
 function rid(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function encodePayload(obj: Record<string, unknown>): string {
+  try {
+    const bytes = new TextEncoder().encode(JSON.stringify(obj));
+    let bin = '';
+    bytes.forEach((b) => {
+      bin += String.fromCharCode(b);
+    });
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  } catch {
+    return '';
+  }
+}
+
+export function decodeWaitlistPayload(encoded: string | null): Partial<WaitlistEntry> | null {
+  if (!encoded) return null;
+  try {
+    const b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = b64.length % 4 === 0 ? '' : '='.repeat(4 - (b64.length % 4));
+    const bin = atob(b64 + pad);
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes)) as Partial<WaitlistEntry>;
+  } catch {
+    return null;
+  }
+}
+
+function getCurrentSiteBase(): string {
+  if (typeof window === 'undefined') return WAITLIST_CONFIG.publicBaseUrl;
+  const href = window.location.href.split('#')[0];
+  return href.endsWith('/') ? href : `${href}/`;
+}
+
+function buildTrackerFromEntries(entries: WaitlistEntry[]): WaitlistTrackerSummary {
+  const pendingLive = entries.filter((e) => e.status === 'PENDING').length;
+  const approvedLive = entries.filter((e) => e.status === 'APPROVED').length;
+  const rejectedLive = entries.filter((e) => e.status === 'REJECTED').length;
+
+  return {
+    approverEmail: WAITLIST_CONFIG.approverEmail,
+    totalJoined: WAITLIST_CONFIG.seededBaseCount + entries.length,
+    pendingCount: WAITLIST_CONFIG.seededBaseCount - WAITLIST_CONFIG.seededApprovedCount + pendingLive,
+    approvedCount: WAITLIST_CONFIG.seededApprovedCount + approvedLive,
+    rejectedCount: rejectedLive,
+    recentSignups: entries.slice(0, 12).map((e) => {
+      const parts = e.name.split(/\s+/).filter(Boolean);
+      const initials = parts.map((p) => p[0]?.toUpperCase() || '').join('').slice(0, 2) || 'PA';
+      return {
+        id: e.id,
+        initials,
+        roleTitle: e.roleTitle,
+        preferredTone: e.preferredTone,
+        status: e.status,
+        queuePosition: e.queuePosition,
+        createdAt: e.createdAt,
+      };
+    }),
+  };
 }
 
 function emptyState(): SandboxState {
@@ -117,6 +181,8 @@ function emptyState(): SandboxState {
     invoices: [],
     notifications: [],
     personalWorkspace: null,
+    waitlistEntries: [],
+    activeWaitlistEmail: null,
   };
 }
 
@@ -226,6 +292,7 @@ export const sandboxEngine = {
       invoices = provisioned.invoices;
     }
 
+    const prev = loadState();
     const demo = buildSeededDemoBundle(orgId, userId, name);
     const personalWorkspace = buildSeededPersonalWorkspace(userId);
 
@@ -264,6 +331,8 @@ export const sandboxEngine = {
       invoices,
       notifications: demo.notifications,
       personalWorkspace,
+      waitlistEntries: prev.waitlistEntries || [],
+      activeWaitlistEmail: prev.activeWaitlistEmail ?? null,
     };
 
     saveState(state);
@@ -1184,5 +1253,298 @@ export const sandboxEngine = {
     st.personalWorkspace = workspace;
     saveState(st);
     return { approval: appr, workspace };
+  },
+
+  // --- Personal Agent Waitlist, Running Tracker & Instant Approval ---
+  getWaitlistTracker(email?: string, accessToken?: string, encodedData?: string | null) {
+    const st = loadState();
+    const entries = st.waitlistEntries || [];
+    let viewerEntry: WaitlistEntry | null = null;
+
+    if (accessToken) {
+      viewerEntry = entries.find((e) => e.accessToken === accessToken) ?? null;
+      if (!viewerEntry && encodedData) {
+        const decoded = decodeWaitlistPayload(encodedData);
+        if (decoded && decoded.email && decoded.accessToken === accessToken) {
+          const restored: WaitlistEntry = {
+            id: decoded.id || rid('wl'),
+            email: decoded.email,
+            name: decoded.name || 'Approved User',
+            roleTitle: decoded.roleTitle || 'Personal Agent User',
+            useCase: decoded.useCase || 'Personal productivity',
+            preferredTone: decoded.preferredTone || 'analytical',
+            wantsBrowser: decoded.wantsBrowser ?? true,
+            wantsFiles: decoded.wantsFiles ?? true,
+            wantsTerminal: decoded.wantsTerminal ?? false,
+            websiteUrl: decoded.websiteUrl || '',
+            status: 'APPROVED',
+            queuePosition: decoded.queuePosition || WAITLIST_CONFIG.seededBaseCount + entries.length + 1,
+            approvalToken: decoded.approvalToken || rid('wlappr'),
+            accessToken,
+            approvalUrl: decoded.approvalUrl || '',
+            accessUrl: decoded.accessUrl || '',
+            approverEmail: WAITLIST_CONFIG.approverEmail,
+            emailDispatchStatus: 'RELAY_SENT',
+            emailDispatchDetail: 'Unlocked via verified Personal Agent approval link.',
+            approvedBy: WAITLIST_CONFIG.approverEmail,
+            approvedAt: new Date().toISOString(),
+            createdAt: decoded.createdAt || new Date().toISOString(),
+          };
+          entries.unshift(restored);
+          st.waitlistEntries = entries;
+          st.activeWaitlistEmail = restored.email;
+          // Apply submitted preferences into personal workspace
+          const { workspace } = this.getPersonalWorkspace();
+          st.personalWorkspace = {
+            ...workspace,
+            tone: restored.preferredTone,
+            terminalEnabled: restored.wantsTerminal,
+            filesEnabled: restored.wantsFiles,
+            avatarLabel: restored.name
+              .split(/\s+/)
+              .map((p) => p[0]?.toUpperCase() || '')
+              .join('')
+              .slice(0, 2) || 'PA',
+          };
+          saveState(st);
+          viewerEntry = restored;
+        }
+      }
+    } else if (email) {
+      viewerEntry = entries.find((e) => e.email === email.trim().toLowerCase()) ?? null;
+    } else if (st.activeWaitlistEmail) {
+      viewerEntry = entries.find((e) => e.email === st.activeWaitlistEmail) ?? null;
+    }
+
+    return {
+      tracker: buildTrackerFromEntries(entries),
+      viewerEntry,
+    };
+  },
+
+  async joinWaitlist(input: {
+    email: string;
+    name: string;
+    roleTitle: string;
+    useCase: string;
+    preferredTone: WaitlistEntry['preferredTone'];
+    wantsBrowser: boolean;
+    wantsFiles: boolean;
+    wantsTerminal: boolean;
+    websiteUrl: string;
+  }) {
+    const st = loadState();
+    const entries = st.waitlistEntries || [];
+    const email = input.email.trim().toLowerCase();
+    const existingIdx = entries.findIndex((e) => e.email === email);
+    const now = new Date().toISOString();
+    const siteBase = getCurrentSiteBase();
+
+    const id = existingIdx >= 0 ? entries[existingIdx].id : rid('wl');
+    const queuePosition =
+      existingIdx >= 0
+        ? entries[existingIdx].queuePosition
+        : WAITLIST_CONFIG.seededBaseCount + entries.length + 1;
+    const approvalToken = existingIdx >= 0 ? entries[existingIdx].approvalToken : `${rid('wlappr')}${rid('sig').slice(3)}`;
+    const accessToken = existingIdx >= 0 ? entries[existingIdx].accessToken : `${rid('wlacc')}${rid('tok').slice(3)}`;
+
+    const portablePayload = encodePayload({
+      id,
+      email,
+      name: input.name.trim(),
+      roleTitle: input.roleTitle.trim(),
+      useCase: input.useCase.trim(),
+      preferredTone: input.preferredTone,
+      wantsBrowser: input.wantsBrowser,
+      wantsFiles: input.wantsFiles,
+      wantsTerminal: input.wantsTerminal,
+      websiteUrl: input.websiteUrl.trim(),
+      queuePosition,
+      approvalToken,
+      accessToken,
+      createdAt: now,
+    });
+
+    const approvalUrl = `${siteBase}#/personal/approve?token=${encodeURIComponent(approvalToken)}&data=${encodeURIComponent(portablePayload)}`;
+    const accessUrl = `${siteBase}#/personal/agent?access=${encodeURIComponent(accessToken)}&data=${encodeURIComponent(portablePayload)}`;
+
+    let emailDispatchStatus: WaitlistEntry['emailDispatchStatus'] = 'MOCK_OUTBOX';
+    let emailDispatchDetail = `Prepared approval email for ${WAITLIST_CONFIG.approverEmail}.`;
+
+    // Attempt live client-side email relay to kingwizemusic@gmail.com via FormSubmit AJAX when running in browser
+    if (typeof fetch === 'function' && typeof window !== 'undefined') {
+      try {
+        const relayRes = await fetch(`https://formsubmit.co/ajax/${WAITLIST_CONFIG.approverEmail}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            _subject: `[SEO OS Waitlist #${queuePosition}] Approve Personal Agent: ${input.name.trim()} (${email})`,
+            _template: 'table',
+            _captcha: 'false',
+            Queue_Position: `#${queuePosition}`,
+            Applicant_Name: input.name.trim(),
+            Applicant_Email: email,
+            Role_or_Title: input.roleTitle.trim(),
+            Website_or_Profile: input.websiteUrl.trim() || 'Not provided',
+            Preferred_Agent_Tone: input.preferredTone,
+            Requested_Tools: `Browser=${input.wantsBrowser ? 'Yes' : 'No'}, Files=${input.wantsFiles ? 'Yes' : 'No'}, Optional Terminal=${input.wantsTerminal ? 'Yes' : 'No'}`,
+            Setup_Use_Case: input.useCase.trim(),
+            INSTANT_APPROVAL_LINK: approvalUrl,
+            USER_UNLOCKED_ACCESS_LINK: accessUrl,
+          }),
+        });
+
+        const relayJson = (await relayRes.json().catch(() => ({}))) as { success?: string | boolean; message?: string };
+        const msg = String(relayJson.message || '');
+        if (relayRes.ok && (relayJson.success === 'true' || relayJson.success === true)) {
+          emailDispatchStatus = 'RELAY_SENT';
+          emailDispatchDetail = `Approval email + instant-approve link dispatched to ${WAITLIST_CONFIG.approverEmail}.`;
+        } else if (msg.toLowerCase().includes('activate') || msg.toLowerCase().includes('confirm')) {
+          emailDispatchStatus = 'RELAY_ACTIVATION_PENDING';
+          emailDispatchDetail = `FormSubmit sent a one-time activation email to ${WAITLIST_CONFIG.approverEmail}. Click Activate once in Gmail to enable automatic inbox delivery for all future signups.`;
+        } else {
+          emailDispatchStatus = 'MOCK_OUTBOX';
+          emailDispatchDetail = msg || `Email relay returned status ${relayRes.status}. Use the direct email fallback or Admin Waitlist panel.`;
+        }
+      } catch {
+        emailDispatchStatus = 'MOCK_OUTBOX';
+        emailDispatchDetail = `Offline/sandbox preview — use the one-click mailto fallback to ${WAITLIST_CONFIG.approverEmail} or approve inside /desk/admin.`;
+      }
+    }
+
+    const entry: WaitlistEntry = {
+      id,
+      email,
+      name: input.name.trim(),
+      roleTitle: input.roleTitle.trim(),
+      useCase: input.useCase.trim(),
+      preferredTone: input.preferredTone,
+      wantsBrowser: input.wantsBrowser,
+      wantsFiles: input.wantsFiles,
+      wantsTerminal: input.wantsTerminal,
+      websiteUrl: input.websiteUrl.trim(),
+      status: existingIdx >= 0 ? entries[existingIdx].status : 'PENDING',
+      queuePosition,
+      approvalToken,
+      accessToken,
+      approvalUrl,
+      accessUrl,
+      approverEmail: WAITLIST_CONFIG.approverEmail,
+      emailDispatchStatus,
+      emailDispatchDetail,
+      approvedBy: existingIdx >= 0 ? entries[existingIdx].approvedBy : null,
+      approvedAt: existingIdx >= 0 ? entries[existingIdx].approvedAt : null,
+      createdAt: existingIdx >= 0 ? entries[existingIdx].createdAt : now,
+    };
+
+    if (existingIdx >= 0) entries[existingIdx] = entry;
+    else entries.unshift(entry);
+
+    st.waitlistEntries = entries;
+    st.activeWaitlistEmail = email;
+    saveState(st);
+
+    return {
+      entry,
+      tracker: buildTrackerFromEntries(entries),
+    };
+  },
+
+  inspectApprovalToken(token: string, encodedData?: string | null): WaitlistEntry | null {
+    const st = loadState();
+    const entries = st.waitlistEntries || [];
+    const found = entries.find((e) => e.approvalToken === token);
+    if (found) return found;
+
+    const decoded = decodeWaitlistPayload(encodedData ?? null);
+    if (decoded && decoded.email && decoded.approvalToken === token) {
+      const siteBase = getCurrentSiteBase();
+      const accessToken = decoded.accessToken || rid('wlacc');
+      const restored: WaitlistEntry = {
+        id: decoded.id || rid('wl'),
+        email: decoded.email,
+        name: decoded.name || 'Waitlist Applicant',
+        roleTitle: decoded.roleTitle || 'Applicant',
+        useCase: decoded.useCase || '',
+        preferredTone: decoded.preferredTone || 'analytical',
+        wantsBrowser: decoded.wantsBrowser ?? true,
+        wantsFiles: decoded.wantsFiles ?? true,
+        wantsTerminal: decoded.wantsTerminal ?? false,
+        websiteUrl: decoded.websiteUrl || '',
+        status: 'PENDING',
+        queuePosition: decoded.queuePosition || WAITLIST_CONFIG.seededBaseCount + entries.length + 1,
+        approvalToken: token,
+        accessToken,
+        approvalUrl: `${siteBase}#/personal/approve?token=${encodeURIComponent(token)}&data=${encodeURIComponent(encodedData || '')}`,
+        accessUrl: `${siteBase}#/personal/agent?access=${encodeURIComponent(accessToken)}&data=${encodeURIComponent(encodedData || '')}`,
+        approverEmail: WAITLIST_CONFIG.approverEmail,
+        emailDispatchStatus: 'RELAY_SENT',
+        emailDispatchDetail: `Opened from approval link emailed to ${WAITLIST_CONFIG.approverEmail}.`,
+        approvedBy: null,
+        approvedAt: null,
+        createdAt: decoded.createdAt || new Date().toISOString(),
+      };
+      entries.unshift(restored);
+      st.waitlistEntries = entries;
+      saveState(st);
+      return restored;
+    }
+    return null;
+  },
+
+  approveWaitlistByToken(token: string, encodedData?: string | null) {
+    const entry = this.inspectApprovalToken(token, encodedData);
+    if (!entry) throw new Error('Invalid or expired waitlist approval token');
+    const st = loadState();
+    const entries = st.waitlistEntries || [];
+    const now = new Date().toISOString();
+    const idx = entries.findIndex((e) => e.id === entry.id);
+    const approved: WaitlistEntry = {
+      ...entry,
+      status: 'APPROVED',
+      approvedBy: `${WAITLIST_CONFIG.approverEmail} (Instant Approval Link)`,
+      approvedAt: now,
+    };
+    if (idx >= 0) entries[idx] = approved;
+    else entries.unshift(approved);
+    st.waitlistEntries = entries;
+    st.activeWaitlistEmail = approved.email;
+    saveState(st);
+    return {
+      approved: true,
+      entry: approved,
+      tracker: buildTrackerFromEntries(entries),
+    };
+  },
+
+  listAdminWaitlist() {
+    const st = loadState();
+    const entries = st.waitlistEntries || [];
+    return {
+      entries,
+      tracker: buildTrackerFromEntries(entries),
+    };
+  },
+
+  decideAdminWaitlist(entryId: string, decision: WaitlistStatus) {
+    const st = loadState();
+    const entries = st.waitlistEntries || [];
+    const idx = entries.findIndex((e) => e.id === entryId);
+    if (idx === -1) throw new Error('Waitlist entry not found');
+    entries[idx] = {
+      ...entries[idx],
+      status: decision,
+      approvedBy: st.user?.email || WAITLIST_CONFIG.approverEmail,
+      approvedAt: new Date().toISOString(),
+    };
+    st.waitlistEntries = entries;
+    saveState(st);
+    return {
+      entry: entries[idx],
+      tracker: buildTrackerFromEntries(entries),
+    };
   },
 };
