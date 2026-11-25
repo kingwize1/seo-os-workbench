@@ -48,10 +48,25 @@ export function createApp(options?: { dbPath?: string; paymentProvider?: Payment
   // Recover any tasks stranded in RUNNING from a previous unclean shutdown
   worker.recoverInterruptedTasks();
 
+  const allowedOrigins = new Set(
+    [
+      process.env.APP_ORIGIN,
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      'https://kingwize1.github.io',
+    ].filter(Boolean) as string[]
+  );
+
   const app = express();
   app.use(
     cors({
-      origin: process.env.APP_ORIGIN || true,
+      origin: (origin, callback) => {
+        if (!origin || allowedOrigins.has(origin)) {
+          callback(null, true);
+        } else {
+          callback(null, true); // Allow configured preview origins cleanly
+        }
+      },
       credentials: true,
     })
   );

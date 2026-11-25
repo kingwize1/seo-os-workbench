@@ -12,22 +12,79 @@ import { sandboxEngine, type DeskBootstrapData } from './sandboxEngine';
 
 // ==============================================================================
 // Unified API Client
-// Uses the real Express+SQLite API when available; seamlessly activates the
-// clearly-badged Static Demo Sandbox when running on GitHub Pages.
+// Uses the real Express+SQLite API when available (or when connected via ?api=
+// from GitHub Pages); seamlessly activates the clearly-badged Static Demo
+// Sandbox when running standalone on GitHub Pages.
 // ==============================================================================
 
+const API_BASE_STORAGE_KEY = 'seo_os_api_base_url';
+const SESSION_TOKEN_STORAGE_KEY = 'seo_os_bearer_token';
 const STATIC_FORCED = import.meta.env.VITE_STATIC_DEMO_MODE === 'true';
 
-let detectedStaticFallback = STATIC_FORCED;
+function resolveInitialApiBase(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    const hashQuery = window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '';
+    const params = new URLSearchParams(window.location.search || hashQuery);
+    const paramApi = params.get('api');
+    if (paramApi) {
+      const clean = paramApi.replace(/\/+$/, '');
+      localStorage.setItem(API_BASE_STORAGE_KEY, clean);
+      return clean;
+    }
+    return localStorage.getItem(API_BASE_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+let customApiBase = resolveInitialApiBase();
+let detectedStaticFallback = STATIC_FORCED && !customApiBase;
+
+export function getConfiguredApiBase(): string {
+  return customApiBase;
+}
+
+export function setConfiguredApiBase(url: string): void {
+  const clean = url.trim().replace(/\/+$/, '');
+  customApiBase = clean;
+  try {
+    if (clean) localStorage.setItem(API_BASE_STORAGE_KEY, clean);
+    else localStorage.removeItem(API_BASE_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+  detectedStaticFallback = STATIC_FORCED && !clean;
+}
+
+function getStoredBearerToken(): string | null {
+  try {
+    return sessionStorage.getItem(SESSION_TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setStoredBearerToken(token: string | null): void {
+  try {
+    if (token) sessionStorage.setItem(SESSION_TOKEN_STORAGE_KEY, token);
+    else sessionStorage.removeItem(SESSION_TOKEN_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 async function tryHttp<T>(url: string, init?: RequestInit): Promise<T | null> {
   if (detectedStaticFallback) return null;
+  const fullUrl = customApiBase ? `${customApiBase}${url}` : url;
+  const bearer = getStoredBearerToken();
   try {
-    const res = await fetch(url, {
+    const res = await fetch(fullUrl, {
       ...init,
-      credentials: 'include',
+      credentials: customApiBase ? 'omit' : 'include',
       headers: {
         'Content-Type': 'application/json',
+        ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
         ...(init?.headers || {}),
       },
     });
@@ -36,14 +93,17 @@ async function tryHttp<T>(url: string, init?: RequestInit): Promise<T | null> {
       detectedStaticFallback = true;
       return null;
     }
-    const json = (await res.json()) as T & { error?: string };
+    const json = (await res.json()) as T & { error?: string; sessionToken?: string };
     if (!res.ok) {
       throw new Error(json.error || `Request failed (${res.status})`);
+    }
+    if (json.sessionToken) {
+      setStoredBearerToken(json.sessionToken);
     }
     return json;
   } catch (err) {
     if (err instanceof TypeError) {
-      // Network error / static host without backend server
+      // Network error / static host without reachable backend server
       detectedStaticFallback = true;
       return null;
     }
@@ -90,6 +150,7 @@ export const api = {
 
   async signout(): Promise<void> {
     const live = await tryHttp('/api/auth/signout', { method: 'POST' });
+    setStoredBearerToken(null);
     if (!live) sandboxEngine.signout();
   },
 

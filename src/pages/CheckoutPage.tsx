@@ -20,6 +20,7 @@ export function CheckoutPage() {
   const [checkoutSession, setCheckoutSession] = useState<{
     provider: 'test' | 'stripe';
     providerSessionId: string;
+    checkoutUrl: string;
     summary: string;
   } | null>(null);
   const [browserReturned, setBrowserReturned] = useState(false);
@@ -52,13 +53,17 @@ export function CheckoutPage() {
       setCheckoutSession({
         provider: res.provider,
         providerSessionId: res.providerSessionId,
+        checkoutUrl: res.checkoutUrl,
         summary: res.summary,
       });
       setBrowserReturned(true);
       setWebhookLog((prev) => [
-        `[${new Date().toLocaleTimeString()}] Created ${res.provider.toUpperCase()} checkout session ${res.providerSessionId} ($997.00 setup). Browser returned — entitlement STILL INACTIVE until verified server webhook arrives.`,
+        `[${new Date().toLocaleTimeString()}] Created ${res.provider.toUpperCase()} checkout session ${res.providerSessionId} ($997.00 setup). Entitlement stays INACTIVE until verified server webhook arrives.`,
         ...prev,
       ]);
+      if (res.provider === 'stripe' && res.checkoutUrl) {
+        showToast('Live Stripe Checkout session created! Click "Open Live Stripe Checkout" below to complete payment.');
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Checkout creation failed');
     } finally {
@@ -243,10 +248,42 @@ export function CheckoutPage() {
                 onClick={handleCreateCheckout}
                 className="inline-flex items-center gap-2 rounded-xl bg-cyan-400 px-5 py-2.5 text-sm font-bold text-slate-950 transition hover:bg-cyan-300 disabled:opacity-40"
               >
-                Create $997 Setup Checkout Session (Test Mode)
+                Create $997 Setup Checkout Session
               </button>
 
-              {browserReturned && (
+              {browserReturned && checkoutSession?.provider === 'stripe' && (
+                <div className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-200">
+                    <CreditCard className="h-4 w-4" />
+                    Live Stripe Checkout Session Ready ({checkoutSession.providerSessionId})
+                  </div>
+                  <p className="text-xs text-slate-300">
+                    Complete the $997 one-time setup payment on Stripe&apos;s hosted checkout page. Access unlocks automatically once Stripe delivers the signed <code className="text-white">checkout.session.completed</code> webhook to <code className="text-cyan-300">/api/webhooks/payment</code>.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <a
+                      href={checkoutSession.checkoutUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-400 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-300"
+                    >
+                      Open Live Stripe Checkout ($997) <ArrowRight className="h-3.5 w-3.5" />
+                    </a>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const snap = await refreshSession();
+                        showToast(`Current entitlement status: ${snap.entitlement?.status ?? 'INACTIVE'}`);
+                      }}
+                      className="rounded-lg border border-white/15 bg-white/5 px-3.5 py-2 text-xs font-semibold text-white hover:bg-white/10"
+                    >
+                      Refresh Entitlement Status
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {browserReturned && checkoutSession?.provider === 'test' && (
                 <div className="rounded-xl border border-white/15 bg-slate-950/90 p-4 space-y-3">
                   <div className="flex items-center gap-2 text-xs font-semibold text-white">
                     <Webhook className="h-4 w-4 text-cyan-400" />
